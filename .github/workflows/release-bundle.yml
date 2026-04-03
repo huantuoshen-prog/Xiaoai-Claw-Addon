@@ -1,15 +1,17 @@
 name: CI And Release Bundle
 
 on:
-  push:
-    branches:
-      - main
-      - master
-  pull_request:
   workflow_dispatch:
-  release:
-    types:
-      - published
+    inputs:
+      upload_release:
+        description: Upload generated assets to an existing GitHub Release
+        required: true
+        type: boolean
+        default: false
+      release_tag:
+        description: Existing GitHub Release tag to update when upload_release is enabled
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -235,24 +237,30 @@ jobs:
   upload-release:
     runs-on: ubuntu-latest
     needs: smoke-test-bundle
-    if: github.event_name == 'release'
+    if: ${{ inputs.upload_release }}
     permissions:
       contents: write
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-
       - name: Download workflow artifact
         uses: actions/download-artifact@v8
         with:
           name: openclaw-plugin-xiaoai-cloud-release-bundle
           path: .
 
+      - name: Validate release tag input
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          if [ -z "$RELEASE_TAG" ]; then
+            echo "release_tag is required when upload_release=true" >&2
+            exit 1
+          fi
+
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           gh release upload "$RELEASE_TAG" \
             openclaw-plugin-xiaoai-cloud-bundle.tar.gz \
