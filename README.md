@@ -11,9 +11,8 @@
 </p>
 
 ## 这是什么
-
 运行在 OpenClaw Gateway 所在环境的插件，把小爱音箱接进 OpenClaw，让 OpenClaw 拥有调用小爱音箱的能力，或者用小爱音箱和 OpenClaw 对话。
-
+<img width="100%" alt="截图 2026-04-03 20 23 13" src="https://github.com/user-attachments/assets/384ef82d-aec7-4cab-9184-66b0299bec2b" />
 当前支持的核心功能：
 - 语音拦截与转发
 - 小爱播报与远程唤醒
@@ -167,3 +166,6 @@ openclaw logs --limit 260 --plain | tail -n 260
 - 阿里云轻量应用服务器2C2G
 - 小爱音箱Play增强版 (L05C)
 - OpenClaw v2026.4.1
+
+## 如果帮到了你，可以捐赠支持我
+<img width="30%" alt="mm_reward_qrcode_1775163379040" src="https://github.com/user-attachments/assets/f04e53d0-72aa-4cf7-a50c-f79e6606c786" />
