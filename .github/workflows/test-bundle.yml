@@ -39,8 +39,11 @@ jobs:
       - name: Verify install helpers
         run: |
           sh -n install.sh
+          sh -n uninstall.sh
           sh install.sh --help >/dev/null
+          sh uninstall.sh --help >/dev/null
           node scripts/configure-openclaw-install.mjs --help >/dev/null
+          node scripts/configure-openclaw-uninstall.mjs --help >/dev/null
 
   verify-windows:
     runs-on: windows-latest
@@ -68,7 +71,9 @@ jobs:
         shell: cmd
         run: |
           call install.cmd --help >NUL
+          call uninstall.cmd --help >NUL
           node scripts\configure-openclaw-install.mjs --help >NUL
+          node scripts\configure-openclaw-uninstall.mjs --help >NUL
 
   bundle:
     runs-on: ubuntu-latest
@@ -106,15 +111,14 @@ jobs:
           cp -R dist "$bundle_root/"
           cp -R assets "$bundle_root/"
           cp scripts/configure-openclaw-install.mjs "$bundle_root/scripts/"
-          cp package.json package-lock.json openclaw.plugin.json install.sh install.cmd "$bundle_root/"
+          cp scripts/configure-openclaw-uninstall.mjs "$bundle_root/scripts/"
+          cp package.json package-lock.json openclaw.plugin.json install.sh install.cmd uninstall.sh uninstall.cmd "$bundle_root/"
 
           test ! -e "$bundle_root/README.md"
           test ! -e "$bundle_root/PROJECT_ANALYSIS.md"
           test ! -e "$bundle_root/CROSS_CLAW_ADAPTATION_PLAN.md"
 
           chmod +x "$bundle_root/install.sh"
-
-          tar -czf openclaw-plugin-xiaoai-cloud-bundle.tar.gz -C release-bundle openclaw-plugin-xiaoai-cloud
           python3 - <<'PY'
           import pathlib
           import zipfile
@@ -130,7 +134,6 @@ jobs:
           PY
 
           sha256sum \
-            openclaw-plugin-xiaoai-cloud-bundle.tar.gz \
             openclaw-plugin-xiaoai-cloud-bundle.zip \
             install.sh \
             install.cmd \
@@ -141,7 +144,6 @@ jobs:
         with:
           name: openclaw-plugin-xiaoai-cloud-test-bundle
           path: |
-            openclaw-plugin-xiaoai-cloud-bundle.tar.gz
             openclaw-plugin-xiaoai-cloud-bundle.zip
             install.sh
             install.cmd
@@ -169,9 +171,8 @@ jobs:
           set -eu
 
           rm -rf smoke-test
-          mkdir -p smoke-test/tar smoke-test/zip
+          mkdir -p smoke-test/zip
 
-          tar -xzf openclaw-plugin-xiaoai-cloud-bundle.tar.gz -C smoke-test/tar
           python3 - <<'PY'
           import pathlib
           import zipfile
@@ -181,37 +182,35 @@ jobs:
               zf.extractall(output_dir)
           PY
 
-          for root in \
-            smoke-test/tar/openclaw-plugin-xiaoai-cloud \
-            smoke-test/zip/openclaw-plugin-xiaoai-cloud
-          do
-            test -f "$root/install.sh"
-            test -f "$root/install.cmd"
-            test -f "$root/openclaw.plugin.json"
-            test -f "$root/package.json"
-            test -f "$root/package-lock.json"
-            test -f "$root/dist/index.js"
-            test -f "$root/dist/src/provider.js"
-            test -f "$root/assets/ui/xiaoai-console.css"
-            test -f "$root/assets/ui/xiaoai-console.js"
-            test -f "$root/assets/ui/favicon.svg"
-            test -f "$root/assets/fonts/manrope/wght.css"
-            test -f "$root/assets/fonts/noto-sans-sc/wght.css"
-            test -f "$root/scripts/configure-openclaw-install.mjs"
-            test ! -e "$root/README.md"
-            test ! -e "$root/PROJECT_ANALYSIS.md"
-            test ! -e "$root/CROSS_CLAW_ADAPTATION_PLAN.md"
-          done
+          root="smoke-test/zip/openclaw-plugin-xiaoai-cloud"
+          test -f "$root/install.sh"
+          test -f "$root/install.cmd"
+          test -f "$root/uninstall.sh"
+          test -f "$root/uninstall.cmd"
+          test -f "$root/openclaw.plugin.json"
+          test -f "$root/package.json"
+          test -f "$root/package-lock.json"
+          test -f "$root/dist/index.js"
+          test -f "$root/dist/src/provider.js"
+          test -f "$root/assets/ui/xiaoai-console.css"
+          test -f "$root/assets/ui/xiaoai-console.js"
+          test -f "$root/assets/ui/favicon.svg"
+          test -f "$root/assets/fonts/manrope/wght.css"
+          test -f "$root/assets/fonts/noto-sans-sc/wght.css"
+          test -f "$root/scripts/configure-openclaw-install.mjs"
+          test -f "$root/scripts/configure-openclaw-uninstall.mjs"
+          test ! -e "$root/README.md"
+          test ! -e "$root/PROJECT_ANALYSIS.md"
+          test ! -e "$root/CROSS_CLAW_ADAPTATION_PLAN.md"
 
       - name: Smoke test extracted install helpers
         run: |
           set -eu
 
-          for root in \
-            smoke-test/tar/openclaw-plugin-xiaoai-cloud \
-            smoke-test/zip/openclaw-plugin-xiaoai-cloud
-          do
-            sh -n "$root/install.sh"
-            sh "$root/install.sh" --help >/dev/null
-            node "$root/scripts/configure-openclaw-install.mjs" --help >/dev/null
-          done
+          root="smoke-test/zip/openclaw-plugin-xiaoai-cloud"
+          sh -n "$root/install.sh"
+          sh -n "$root/uninstall.sh"
+          sh "$root/install.sh" --help >/dev/null
+          sh "$root/uninstall.sh" --help >/dev/null
+          node "$root/scripts/configure-openclaw-install.mjs" --help >/dev/null
+          node "$root/scripts/configure-openclaw-uninstall.mjs" --help >/dev/null

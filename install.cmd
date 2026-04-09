@@ -219,8 +219,9 @@ echo.
 echo Notes:
 echo   - You can run this script in the source repo directory.
 echo   - You can also place this script beside a GitHub Release bundle archive
-echo     ^(openclaw-plugin-xiaoai-cloud-bundle.zip / .tar.gz^), and it will
+echo     ^(openclaw-plugin-xiaoai-cloud-bundle.zip^), and it will
 echo     auto-extract and install from that bundle.
+echo   - Older .tar.gz / .tgz release bundles are still supported for backward compatibility.
 echo   - If your OpenClaw gateway runs in Docker or on a remote server, run this script
 echo     inside that same container / host environment.
 echo   - If OpenClaw is not on PATH, pass --openclaw-bin with a local wrapper script path.
@@ -262,7 +263,8 @@ call :find_release_archive
 if errorlevel 1 exit /b 1
 if not defined RELEASE_ARCHIVE (
   echo No package.json found in %SCRIPT_DIR%, and no release bundle archive was found beside install.cmd.
-  echo Expected one of: openclaw-plugin-xiaoai-cloud-bundle.tar.gz / .zip
+  echo Expected: openclaw-plugin-xiaoai-cloud-bundle.zip
+  echo Older .tar.gz / .tgz release bundles are still accepted if you already have one.
   exit /b 1
 )
 
@@ -286,12 +288,17 @@ exit /b 0
 :find_release_archive
 set "RELEASE_ARCHIVE="
 set "RELEASE_ARCHIVE_NAME="
-for %%F in ("%SCRIPT_DIR%\openclaw-plugin-xiaoai-cloud-bundle.tar.gz") do if exist "%%~fF" (
+for %%F in ("%SCRIPT_DIR%\openclaw-plugin-xiaoai-cloud-bundle.zip") do if exist "%%~fF" (
   set "RELEASE_ARCHIVE=%%~fF"
   set "RELEASE_ARCHIVE_NAME=%%~nxF"
   exit /b 0
 )
-for %%F in ("%SCRIPT_DIR%\openclaw-plugin-xiaoai-cloud-bundle.zip") do if exist "%%~fF" (
+for %%F in ("%SCRIPT_DIR%\openclaw-plugin-xiaoai-cloud-*.zip") do if exist "%%~fF" (
+  set "RELEASE_ARCHIVE=%%~fF"
+  set "RELEASE_ARCHIVE_NAME=%%~nxF"
+  exit /b 0
+)
+for %%F in ("%SCRIPT_DIR%\openclaw-plugin-xiaoai-cloud-bundle.tar.gz") do if exist "%%~fF" (
   set "RELEASE_ARCHIVE=%%~fF"
   set "RELEASE_ARCHIVE_NAME=%%~nxF"
   exit /b 0
@@ -302,11 +309,6 @@ for %%F in ("%SCRIPT_DIR%\openclaw-plugin-xiaoai-cloud-*.tgz") do if exist "%%~f
   exit /b 0
 )
 for %%F in ("%SCRIPT_DIR%\openclaw-plugin-xiaoai-cloud-*.tar.gz") do if exist "%%~fF" (
-  set "RELEASE_ARCHIVE=%%~fF"
-  set "RELEASE_ARCHIVE_NAME=%%~nxF"
-  exit /b 0
-)
-for %%F in ("%SCRIPT_DIR%\openclaw-plugin-xiaoai-cloud-*.zip") do if exist "%%~fF" (
   set "RELEASE_ARCHIVE=%%~fF"
   set "RELEASE_ARCHIVE_NAME=%%~nxF"
   exit /b 0

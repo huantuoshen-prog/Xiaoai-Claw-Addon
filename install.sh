@@ -36,8 +36,9 @@ Options:
 Notes:
   - You can run this script in the source repo directory.
   - You can also place this script beside a GitHub Release bundle archive
-    (openclaw-plugin-xiaoai-cloud-bundle.tar.gz / .zip), and it will
+    (`openclaw-plugin-xiaoai-cloud-bundle.zip`), and it will
     auto-extract and install from that bundle.
+  - Older `.tar.gz` / `.tgz` release bundles are still supported for backward compatibility.
   - If your unzip tool stripped the executable bit from install.sh,
     running `bash ./install.sh` is equally valid.
   - If your OpenClaw gateway runs in Docker or on a remote server, run this script
@@ -170,13 +171,18 @@ require_command() {
 }
 
 find_release_archive() {
-  find "$SCRIPT_DIR" -maxdepth 1 -type f \( \
-    -name 'openclaw-plugin-xiaoai-cloud-bundle.tar.gz' -o \
-    -name 'openclaw-plugin-xiaoai-cloud-bundle.zip' -o \
-    -name 'openclaw-plugin-xiaoai-cloud-*.tgz' -o \
-    -name 'openclaw-plugin-xiaoai-cloud-*.tar.gz' -o \
-    -name 'openclaw-plugin-xiaoai-cloud-*.zip' \
-  \) | sort | head -n 1
+  for candidate in \
+    "$SCRIPT_DIR"/openclaw-plugin-xiaoai-cloud-bundle.zip \
+    "$SCRIPT_DIR"/openclaw-plugin-xiaoai-cloud-*.zip \
+    "$SCRIPT_DIR"/openclaw-plugin-xiaoai-cloud-bundle.tar.gz \
+    "$SCRIPT_DIR"/openclaw-plugin-xiaoai-cloud-*.tgz \
+    "$SCRIPT_DIR"/openclaw-plugin-xiaoai-cloud-*.tar.gz
+  do
+    if [ -f "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
 }
 
 resolve_extracted_source_dir() {
@@ -214,7 +220,8 @@ prepare_source_dir() {
   archive_path=$(find_release_archive || true)
   if [ -z "$archive_path" ]; then
     error "No package.json found in $SCRIPT_DIR, and no release bundle archive was found beside install.sh."
-    error "Expected one of: openclaw-plugin-xiaoai-cloud-bundle.tar.gz / .zip"
+    error "Expected: openclaw-plugin-xiaoai-cloud-bundle.zip"
+    error "Older .tar.gz / .tgz release bundles are still accepted if you already have one."
     exit 1
   fi
 
