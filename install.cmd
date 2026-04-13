@@ -383,7 +383,7 @@ if exist "%SOURCE_DIR%\src" if exist "%SOURCE_DIR%\index.ts" if exist "%SOURCE_D
 exit /b 0
 
 :ensure_node_supported
-for /f %%v in ('node -p "Number(process.versions.node.split('.')[0] ^|^| 0)"') do set "NODE_MAJOR=%%v"
+for /f %%v in ('node -p "process.versions.node.split('.')[0]"') do set "NODE_MAJOR=%%v"
 if not defined NODE_MAJOR (
   echo Failed to detect Node.js version.
   exit /b 1
