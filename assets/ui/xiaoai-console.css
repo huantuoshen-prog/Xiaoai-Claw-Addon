@@ -6874,3 +6874,25 @@ button.mode-btn {
     padding: 10px 12px;
   }
 }
+
+@media (max-width: 720px) {
+  .calibration-card-head {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .calibration-card-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    justify-items: stretch;
+    align-self: stretch;
+  }
+
+  .calibration-card-actions .picker-root,
+  .calibration-card-actions .soft-btn {
+    width: 100%;
+    min-width: 0;
+  }
+}

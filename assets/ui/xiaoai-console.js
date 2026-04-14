@@ -596,6 +596,26 @@ function initConsolePage() {
   let controlLayoutMode = "single";
   const controlCardAssignments = new WeakMap();
 
+  function isControlEditorElement(element) {
+    if (!(element instanceof HTMLElement) || !els.controlStack) {
+      return false;
+    }
+    if (!els.controlStack.contains(element)) {
+      return false;
+    }
+    if (element.isContentEditable) {
+      return true;
+    }
+    return Boolean(element.closest("input, textarea, select"));
+  }
+
+  function isControlTextEditing() {
+    if (state.activeTab !== "control") {
+      return false;
+    }
+    return isControlEditorElement(document.activeElement);
+  }
+
   function restoreControlScrollTop(scrollTop) {
     if (!els.controlScreenScroll || !Number.isFinite(scrollTop)) {
       return;
@@ -664,7 +684,9 @@ function initConsolePage() {
       columns[0].hidden = false;
       columns[1].hidden = true;
       cards.forEach((card) => {
-        columns[0].appendChild(card);
+        if (card.parentElement !== columns[0]) {
+          columns[0].appendChild(card);
+        }
       });
       controlLayoutMode = "single";
       return;
@@ -681,12 +703,17 @@ function initConsolePage() {
     }
     cards.forEach((card) => {
       const targetIndex = controlCardAssignments.get(card) === 1 ? 1 : 0;
-      columns[targetIndex].appendChild(card);
+      if (card.parentElement !== columns[targetIndex]) {
+        columns[targetIndex].appendChild(card);
+      }
     });
     controlLayoutMode = "double";
   }
 
   function scheduleControlMasonryLayout(forceReassign) {
+    if (!forceReassign && isControlTextEditing()) {
+      return;
+    }
     controlMasonryForceReassign =
       controlMasonryForceReassign || Boolean(forceReassign);
     if (controlMasonryFrame) {
@@ -696,6 +723,9 @@ function initConsolePage() {
       controlMasonryFrame = 0;
       const shouldReassign = controlMasonryForceReassign;
       controlMasonryForceReassign = false;
+      if (!shouldReassign && isControlTextEditing()) {
+        return;
+      }
       applyControlMasonryLayout(shouldReassign);
     });
   }
@@ -6166,7 +6196,9 @@ function initConsolePage() {
   function installRefreshTimer() {
     window.clearInterval(state.refreshTimer);
     state.refreshTimer = window.setInterval(() => {
-      refreshBootstrap(true);
+      if (!isControlTextEditing()) {
+        refreshBootstrap(true);
+      }
       if (state.activeTab === "chat") {
         refreshConversations(true);
       }
