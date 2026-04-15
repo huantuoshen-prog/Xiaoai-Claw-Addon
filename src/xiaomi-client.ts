@@ -612,6 +612,36 @@ function findVerificationPageUrlInText(text: string): string | undefined {
     return undefined;
 }
 
+function inferVerificationMethodsFromUrl(
+    verifyUrl: string | undefined
+): XiaomiVerificationMethod[] {
+    if (typeof verifyUrl !== "string") {
+        return [];
+    }
+    const normalized = verifyUrl.toLowerCase();
+    if (normalized.includes("/fe/service/identity/verifyphone")) {
+        return ["phone"];
+    }
+    if (normalized.includes("/fe/service/identity/verifyemail")) {
+        return ["email"];
+    }
+    return [];
+}
+
+function mergeVerificationMethods(
+    ...groups: Array<ReadonlyArray<XiaomiVerificationMethod> | undefined>
+): XiaomiVerificationMethod[] {
+    const merged = new Set<XiaomiVerificationMethod>();
+    for (const group of groups) {
+        for (const item of group || []) {
+            if (item === "phone" || item === "email") {
+                merged.add(item);
+            }
+        }
+    }
+    return Array.from(merged);
+}
+
 function deriveVerificationPageUrl(
     verifyUrl: string,
     method: XiaomiVerificationMethod
@@ -1746,9 +1776,10 @@ export class XiaomiAccountClient {
     private async getVerificationDetails(
         verifyUrl: string
     ): Promise<XiaomiVerificationDetails> {
+        const inferredMethods = inferVerificationMethodsFromUrl(verifyUrl);
         if (!verifyUrl.includes("/fe/service/identity/authStart")) {
             return {
-                methods: [],
+                methods: inferredMethods,
                 identitySession:
                     this.identitySession || this.accountCookies.identity_session,
             };
@@ -1790,7 +1821,7 @@ export class XiaomiAccountClient {
             }
         }
         return {
-            methods: Array.from(methods),
+            methods: mergeVerificationMethods(Array.from(methods), inferredMethods),
             identitySession,
         };
     }
@@ -1808,7 +1839,12 @@ export class XiaomiAccountClient {
         }
 
         let currentUrl = resolvedLocation;
+        const visited = new Set<string>();
         for (let index = 0; index < 12; index += 1) {
+            if (visited.has(currentUrl)) {
+                break;
+            }
+            visited.add(currentUrl);
             const { response, text } = await this.accountRequestRaw(currentUrl, {
                 method: "GET",
             });
@@ -1816,24 +1852,56 @@ export class XiaomiAccountClient {
             const responseUrl = resolveAccountUrl(response.url);
             if (
                 responseUrl &&
-                responseUrl.includes("/fe/service/identity/authStart")
+                /\/fe\/service\/identity\/(?:authStart|verifyPhone|verifyEmail)/i.test(
+                    responseUrl
+                )
             ) {
                 const details = await this.getVerificationDetails(responseUrl);
                 return {
                     verifyUrl: responseUrl,
-                    methods: details.methods,
+                    methods: mergeVerificationMethods(
+                        details.methods,
+                        inferVerificationMethodsFromUrl(responseUrl)
+                    ),
                     identitySession: details.identitySession,
                 };
             }
 
-            const embeddedVerifyUrl = findVerificationUrlInText(text);
+            const embeddedVerifyUrl =
+                findVerificationUrlInText(text) || findVerificationPageUrlInText(text);
             if (embeddedVerifyUrl) {
                 const details = await this.getVerificationDetails(embeddedVerifyUrl);
                 return {
                     verifyUrl: embeddedVerifyUrl,
-                    methods: details.methods,
+                    methods: mergeVerificationMethods(
+                        details.methods,
+                        inferVerificationMethodsFromUrl(embeddedVerifyUrl)
+                    ),
                     identitySession: details.identitySession,
                 };
+            }
+
+            const embeddedFollowupUrl = resolveAccountUrl(
+                (() => {
+                    const absoluteMatch = text.match(
+                        /https?:\/\/account\.xiaomi\.com\/(?:pass2\/redirect|fe\/service\/notification)[^\s"'<>)]*/i
+                    );
+                    if (absoluteMatch?.[0]) {
+                        return absoluteMatch[0];
+                    }
+                    const relativeMatch = text.match(
+                        /\/(?:pass2\/redirect|fe\/service\/notification)[^\s"'<>)]*/i
+                    );
+                    return relativeMatch?.[0];
+                })()
+            );
+            if (
+                embeddedFollowupUrl &&
+                !visited.has(embeddedFollowupUrl) &&
+                embeddedFollowupUrl !== currentUrl
+            ) {
+                currentUrl = embeddedFollowupUrl;
+                continue;
             }
 
             const nextLocation = response.headers.get("location");
@@ -1844,6 +1912,61 @@ export class XiaomiAccountClient {
         }
 
         return { methods: [] };
+    }
+
+    private async refreshVerificationChallenge(verifyUrl: string): Promise<{
+        verifyUrl: string;
+        methods: XiaomiVerificationMethod[];
+        identitySession?: string;
+    }> {
+        let effectiveVerifyUrl = resolveAccountUrl(verifyUrl) || verifyUrl;
+        let methods = mergeVerificationMethods(
+            this.verificationMethods,
+            inferVerificationMethodsFromUrl(effectiveVerifyUrl)
+        );
+        let identitySession = this.identitySession || this.accountCookies.identity_session;
+
+        const details = await this.getVerificationDetails(effectiveVerifyUrl);
+        methods = mergeVerificationMethods(methods, details.methods);
+        identitySession = details.identitySession || identitySession;
+
+        if (
+            !effectiveVerifyUrl.includes("/fe/service/identity/authStart") ||
+            methods.length === 0 ||
+            !identitySession
+        ) {
+            const discovered = await this.resolveVerificationUrlFromLocation(
+                effectiveVerifyUrl
+            );
+            if (discovered.verifyUrl) {
+                effectiveVerifyUrl = discovered.verifyUrl;
+            }
+            methods = mergeVerificationMethods(
+                methods,
+                discovered.methods,
+                inferVerificationMethodsFromUrl(effectiveVerifyUrl)
+            );
+            identitySession = discovered.identitySession || identitySession;
+
+            if (methods.length === 0 || !identitySession) {
+                const refreshed = await this.getVerificationDetails(effectiveVerifyUrl);
+                methods = mergeVerificationMethods(
+                    methods,
+                    refreshed.methods,
+                    inferVerificationMethodsFromUrl(effectiveVerifyUrl)
+                );
+                identitySession = refreshed.identitySession || identitySession;
+            }
+        }
+
+        this.verificationUrl = effectiveVerifyUrl;
+        this.verificationMethods = methods;
+        this.identitySession = identitySession || undefined;
+        return {
+            verifyUrl: effectiveVerifyUrl,
+            methods,
+            identitySession: identitySession || undefined,
+        };
     }
 
     private async followAccountRedirects(location: string): Promise<void> {
@@ -1894,7 +2017,8 @@ export class XiaomiAccountClient {
         let identitySession: string | undefined;
 
         if (verifyUrl) {
-            const details = await this.getVerificationDetails(verifyUrl);
+            const details = await this.refreshVerificationChallenge(verifyUrl);
+            verifyUrl = details.verifyUrl;
             methods = details.methods;
             identitySession = details.identitySession;
         } else if (auth.location) {
@@ -1904,6 +2028,12 @@ export class XiaomiAccountClient {
             verifyUrl = discovered.verifyUrl;
             methods = discovered.methods;
             identitySession = discovered.identitySession;
+            if (verifyUrl) {
+                const refreshed = await this.refreshVerificationChallenge(verifyUrl);
+                verifyUrl = refreshed.verifyUrl;
+                methods = refreshed.methods;
+                identitySession = refreshed.identitySession;
+            }
         }
 
         if (verifyUrl) {
@@ -1962,8 +2092,8 @@ export class XiaomiAccountClient {
     }
 
     private async verifyTicket(sid: XiaomiSid, ticket: string): Promise<any> {
-        const verifyUrl = this.verificationUrl;
-        if (!verifyUrl) {
+        const activeVerifyUrl = this.verificationUrl;
+        if (!activeVerifyUrl) {
             throw new Error("当前没有可继续的二次验证会话，请重新发起一次登录。");
         }
 
@@ -1972,15 +2102,8 @@ export class XiaomiAccountClient {
             throw new Error("请输入短信或邮箱收到的验证码。");
         }
 
-        const details =
-            this.verificationMethods.length > 0 || this.identitySession
-                ? {
-                      methods: [...this.verificationMethods],
-                      identitySession:
-                          this.identitySession ||
-                          this.accountCookies.identity_session,
-                  }
-                : await this.getVerificationDetails(verifyUrl);
+        const details = await this.refreshVerificationChallenge(activeVerifyUrl);
+        const verifyUrl = details.verifyUrl;
         const methods =
             details.methods.length > 0 ? details.methods : ["phone", "email"];
         const identitySession =
@@ -2240,20 +2363,13 @@ export class XiaomiAccountClient {
     }
 
     async prepareVerificationPage(preferredMethod?: XiaomiVerificationMethod) {
-        const verifyUrl = this.verificationUrl;
-        if (!verifyUrl) {
+        const activeVerifyUrl = this.verificationUrl;
+        if (!activeVerifyUrl) {
             throw new Error("当前没有可继续的二次验证会话，请重新发起一次登录。");
         }
 
-        const details =
-            this.verificationMethods.length > 0 || this.identitySession
-                ? {
-                      methods: [...this.verificationMethods],
-                      identitySession:
-                          this.identitySession ||
-                          this.accountCookies.identity_session,
-                  }
-                : await this.getVerificationDetails(verifyUrl);
+        const details = await this.refreshVerificationChallenge(activeVerifyUrl);
+        const verifyUrl = details.verifyUrl;
         const methods: XiaomiVerificationMethod[] =
             details.methods.length > 0 ? details.methods : ["phone", "email"];
         const chosenMethod: XiaomiVerificationMethod =
@@ -2311,20 +2427,13 @@ export class XiaomiAccountClient {
     }
 
     async requestVerificationCode(preferredMethod?: XiaomiVerificationMethod) {
-        const verifyUrl = this.verificationUrl;
-        if (!verifyUrl) {
+        const activeVerifyUrl = this.verificationUrl;
+        if (!activeVerifyUrl) {
             throw new Error("当前没有待处理的二次验证会话，请重新点一次登录。");
         }
 
-        const details =
-            this.verificationMethods.length > 0 || this.identitySession
-                ? {
-                      methods: [...this.verificationMethods],
-                      identitySession:
-                          this.identitySession ||
-                          this.accountCookies.identity_session,
-                  }
-                : await this.getVerificationDetails(verifyUrl);
+        const details = await this.refreshVerificationChallenge(activeVerifyUrl);
+        const verifyUrl = details.verifyUrl;
         const availableMethods = details.methods.length
             ? [...details.methods]
             : this.verificationMethods.length
