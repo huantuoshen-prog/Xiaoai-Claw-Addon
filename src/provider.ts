@@ -116,6 +116,8 @@ interface PendingVerificationContext {
     sid: XiaomiSid;
     payload: LoginSubmission;
     state: XiaomiVerificationState;
+    lastCodeRequestMethod?: XiaomiVerificationMethod;
+    lastCodeRequestAt?: number;
 }
 
 interface VolumeSnapshot {
@@ -8461,14 +8463,50 @@ class XiaoaiCloudPlugin {
         accountClient.setVerificationState(pending.state);
 
         const result = await accountClient.prepareVerificationPage(preferredMethod);
+        let codeRequestMessage = "";
+        const selectedMethod: XiaomiVerificationMethod =
+            (readString((result as any)?.method) as XiaomiVerificationMethod) ||
+            preferredMethod ||
+            pending.lastCodeRequestMethod ||
+            "phone";
+        const now = Date.now();
+        const REQUEST_COOLDOWN_MS = 60 * 1000;
+        const canAutoRequestCode = !(
+            pending.lastCodeRequestMethod === selectedMethod &&
+            pending.lastCodeRequestAt &&
+            now - pending.lastCodeRequestAt < REQUEST_COOLDOWN_MS
+        );
+        let lastCodeRequestMethod = pending.lastCodeRequestMethod;
+        let lastCodeRequestAt = pending.lastCodeRequestAt;
+
+        if (canAutoRequestCode) {
+            try {
+                const codeRequestResult = await accountClient.requestVerificationCode(selectedMethod);
+                codeRequestMessage = readString(codeRequestResult?.message) || "";
+                lastCodeRequestMethod = selectedMethod;
+                lastCodeRequestAt = now;
+            } catch (error) {
+                const reason = this.errorMessage(error);
+                console.warn(
+                    `[XiaoAI Cloud] Failed to auto request verification code for ${sessionId}: ${reason}`
+                );
+                codeRequestMessage =
+                    "已打开官方验证页面；如果未自动收到验证码，请在页面中手动获取后再回到这里填写。";
+            }
+        } else {
+            codeRequestMessage = "验证码请求过于频繁，请稍候后再试。";
+        }
+
         const nextState = accountClient.getVerificationState() || pending.state;
         this.pendingVerifications.set(sessionId, {
             ...pending,
             state: nextState,
+            lastCodeRequestMethod,
+            lastCodeRequestAt,
         });
 
         return {
-            message: result.message,
+            message: [result.message, codeRequestMessage].filter(Boolean).join("\n"),
             openUrl: result.openUrl,
             verification: {
                 verifyUrl: nextState.verifyUrl,
