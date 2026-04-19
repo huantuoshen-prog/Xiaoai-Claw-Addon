@@ -686,6 +686,10 @@ const AUDIO_PLAYBACK_BOOTSTRAP_VERIFY_DELAYS_MS = [420, 700];
 const AUDIO_PLAYBACK_FIRST_RELAY_HIT_GRACE_DELAYS_MS = [420, 700];
 const AUDIO_PLAYBACK_FAST_STATUS_TIMEOUT_MS = 1200;
 const AUDIO_PLAYBACK_FAST_STATUS_MAX_ATTEMPTS = 1;
+const AUDIO_PLAYBACK_BASELINE_STATUS_TIMEOUT_MS = 520;
+const AUDIO_PLAYBACK_NON_INTERRUPT_BASELINE_STATUS_TIMEOUT_MS = 320;
+const AUDIO_PLAYBACK_VERIFY_FAST_STATUS_TIMEOUT_MS = 520;
+const AUDIO_PLAYBACK_VERIFY_FAST_PROBE_ATTEMPTS = 2;
 const AUDIO_SOURCE_PREFLIGHT_TIMEOUT_MS = 4500;
 const AUDIO_RELAY_RANGE0_FULL_RESPONSE_COMPAT =
     readBoolean(process.env.XIAOAI_CLOUD_AUDIO_RELAY_RANGE0_FULL_RESPONSE) ===
@@ -9929,6 +9933,7 @@ class XiaoaiCloudPlugin {
         const isHostedRelayCandidate = Boolean(
             options?.relayUrl && this.isHostedAudioRelayUrl(options.relayUrl)
         );
+        let probeAttempt = 0;
         const buildFailedVerifyResult = (): SpeakerPlaybackVerifyResult => ({
             started: false,
             snapshot: lastSnapshot,
@@ -9943,10 +9948,16 @@ class XiaoaiCloudPlugin {
         });
 
         const probePlaybackState = async (): Promise<SpeakerPlaybackVerifyResult | null> => {
+            const useFastProbe =
+                probeAttempt < AUDIO_PLAYBACK_VERIFY_FAST_PROBE_ATTEMPTS;
+            probeAttempt += 1;
             const rawCurrent =
                 (await this.readSpeakerPlaybackSnapshotWithTiming(mina, deviceId, {
-                    timeoutMs: AUDIO_PLAYBACK_FAST_STATUS_TIMEOUT_MS,
+                    timeoutMs: useFastProbe
+                        ? AUDIO_PLAYBACK_VERIFY_FAST_STATUS_TIMEOUT_MS
+                        : AUDIO_PLAYBACK_FAST_STATUS_TIMEOUT_MS,
                     maxAttempts: AUDIO_PLAYBACK_FAST_STATUS_MAX_ATTEMPTS,
+                    skipMediaFallback: useFastProbe,
                 })) || null;
             if (this.isExternalAudioPlaceholderSnapshot(rawCurrent)) {
                 placeholderObserved = true;
@@ -11395,7 +11406,6 @@ class XiaoaiCloudPlugin {
         const extension = readString(options?.extension) || ".mp3";
         const nowMs = Date.now();
         const filePath = await this.persistBufferedAudioRelay(relayId, extension, buffer);
-        const durationMs = await this.probeLocalAudioDurationMs(filePath);
         this.audioRelayEntries.set(relayId, {
             id: relayId,
             extension,
@@ -11407,9 +11417,21 @@ class XiaoaiCloudPlugin {
             createdAtMs: nowMs,
             expiresAtMs: nowMs + AUDIO_RELAY_TTL_MS,
             hitCount: 0,
-            durationMs,
             tailPaddingMs: readNumber(options?.tailPaddingMs),
         });
+        void this.probeLocalAudioDurationMs(filePath)
+            .then((durationMs) => {
+                if (typeof durationMs !== "number" || durationMs <= 0) {
+                    return;
+                }
+                const current = this.audioRelayEntries.get(relayId);
+                if (!current || current.filePath !== filePath) {
+                    return;
+                }
+                current.durationMs = durationMs;
+                this.audioRelayEntries.set(relayId, current);
+            })
+            .catch(() => undefined);
         this.pruneAudioRelayEntries(nowMs);
         return this.buildManagedAudioRelayUrl(relayId, extension);
     }
@@ -15785,18 +15807,22 @@ class XiaoaiCloudPlugin {
         const capabilityUrl = normalizeRemoteMediaUrl(requestedUrl) || requestedUrl;
 
         const { device, mina } = await this.ensureActionContext();
+        const interruptPlayback = options?.interrupt !== false;
         const initialBeforePlayback = this.sanitizeSpeakerPlaybackBaseline(
             await this.readSpeakerPlaybackSnapshotWithTiming(
                 mina,
                 device.minaDeviceId,
                 {
-                    timeoutMs: AUDIO_PLAYBACK_FAST_STATUS_TIMEOUT_MS,
+                    timeoutMs: interruptPlayback
+                        ? AUDIO_PLAYBACK_BASELINE_STATUS_TIMEOUT_MS
+                        : AUDIO_PLAYBACK_NON_INTERRUPT_BASELINE_STATUS_TIMEOUT_MS,
                     maxAttempts: AUDIO_PLAYBACK_FAST_STATUS_MAX_ATTEMPTS,
+                    skipMediaFallback: true,
                 }
             )
         );
         const shouldInterruptCurrentPlayback =
-            options?.interrupt !== false &&
+            interruptPlayback &&
             Boolean(
                 initialBeforePlayback &&
                     !this.isSpeakerPlaybackPausedOrStopped(initialBeforePlayback)
@@ -15837,8 +15863,9 @@ class XiaoaiCloudPlugin {
                     mina,
                     device.minaDeviceId,
                     {
-                        timeoutMs: AUDIO_PLAYBACK_FAST_STATUS_TIMEOUT_MS,
+                        timeoutMs: AUDIO_PLAYBACK_BASELINE_STATUS_TIMEOUT_MS,
                         maxAttempts: AUDIO_PLAYBACK_FAST_STATUS_MAX_ATTEMPTS,
+                        skipMediaFallback: true,
                     }
                 )) || initialBeforePlayback
                 : initialBeforePlayback

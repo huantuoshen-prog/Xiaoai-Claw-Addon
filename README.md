@@ -291,6 +291,15 @@ openclaw logs --limit 260 --plain | tail -n 260
 7. 如果只有 `audio_relay_hit` 没有 `audio_playback_started`，优先排查设备侧起播/状态回读，而不是先判定为网络断流
 8. 复现时建议同一音频连续重放两次：一次可能偶发，连续成功或连续失败更能说明问题归因
 
+如果你遇到“起播慢（已播但要等很久才返回）”：
+
+1. 先看 `xiaomi-network.log` 里的 `audio_playback_started`，重点看 `playbackAcceptedAtMs` 和 `playbackObservedAtMs`
+2. `playbackObservedAtMs - playbackAcceptedAtMs` 主要代表“云端已接收后，到插件确认已起播”的耗时
+3. 如果第 2 步耗时已经较小（常见 < 1s），但接口总耗时仍高，优先排查音频源准备链路（预检/转码/relay 注册）
+4. 如果第 2 步耗时偏大，优先排查设备状态回读和起播确认链路，而不是先归因为网络断流
+5. 取日志时尽量在复现后立刻抓取：`xiaomi-network.log` 会自动裁剪，老事件会被清掉
+6. 当前版本已做三项起播优化：非打断播放路径使用更短的基线状态探测、起播确认前几轮走快速探测、缓冲 relay 的音频时长探测改为异步
+
 如果你遇到“执行指令循环”：
 
 1. 优先使用 `xiaoai_execute`
