@@ -112,36 +112,46 @@ jobs:
           set -eu
 
           bundle_root="release-bundle/openclaw-plugin-xiaoai-cloud"
+          pack_work_dir="release-bundle/npm-pack"
 
           rm -rf release-bundle
           rm -f openclaw-plugin-xiaoai-cloud-bundle.zip release-assets.sha256
 
-          mkdir -p "$bundle_root/scripts"
+          mkdir -p "$pack_work_dir"
 
-          cp -R dist "$bundle_root/"
-          cp -R assets "$bundle_root/"
-          cp scripts/configure-openclaw-install.mjs "$bundle_root/scripts/"
-          cp scripts/configure-openclaw-uninstall.mjs "$bundle_root/scripts/"
-          cp scripts/probe-xiaomi-status.mjs "$bundle_root/scripts/"
-          cp package.json package-lock.json openclaw.plugin.json install.sh install.cmd uninstall.sh uninstall.cmd "$bundle_root/"
+          npm pack --json > release-bundle/npm-pack.json
+          package_tgz=$(node -e "const fs = require('fs'); const pack = JSON.parse(fs.readFileSync('release-bundle/npm-pack.json', 'utf8')); console.log(pack[0].filename);")
+          tar -xzf "$package_tgz" -C "$pack_work_dir"
+          mv "$pack_work_dir/package" "$bundle_root"
+          rm -f "$package_tgz"
 
-          test ! -e "$bundle_root/README.md"
+          test -f "$bundle_root/package.json"
+          test -f "$bundle_root/openclaw.plugin.json"
+          test -f "$bundle_root/README.md"
+          test -f "$bundle_root/LICENSE"
+          test -f "$bundle_root/dist/index.js"
+          test -f "$bundle_root/dist/src/provider.js"
+          test -f "$bundle_root/install.sh"
+          test -f "$bundle_root/install.cmd"
+          test -f "$bundle_root/uninstall.sh"
+          test -f "$bundle_root/uninstall.cmd"
+          test -f "$bundle_root/scripts/publish-clawhub-package.mjs"
           test ! -e "$bundle_root/PROJECT_ANALYSIS.md"
           test ! -e "$bundle_root/CROSS_CLAW_ADAPTATION_PLAN.md"
 
           chmod +x "$bundle_root/install.sh"
+          chmod +x "$bundle_root/uninstall.sh"
           python3 - <<'PY'
           import pathlib
           import zipfile
 
-          root = pathlib.Path("release-bundle")
-          source_dir = root / "openclaw-plugin-xiaoai-cloud"
+          source_dir = pathlib.Path("release-bundle/openclaw-plugin-xiaoai-cloud")
           output = pathlib.Path("openclaw-plugin-xiaoai-cloud-bundle.zip")
 
           with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as zf:
               for path in sorted(source_dir.rglob("*")):
                   if path.is_file():
-                      zf.write(path, path.relative_to(root))
+                      zf.write(path, path.relative_to(source_dir))
           PY
 
           sha256sum \
@@ -193,14 +203,15 @@ jobs:
               zf.extractall(output_dir)
           PY
 
-          root="smoke-test/zip/openclaw-plugin-xiaoai-cloud"
+          root="smoke-test/zip"
           test -f "$root/install.sh"
           test -f "$root/install.cmd"
           test -f "$root/uninstall.sh"
           test -f "$root/uninstall.cmd"
           test -f "$root/openclaw.plugin.json"
           test -f "$root/package.json"
-          test -f "$root/package-lock.json"
+          test -f "$root/README.md"
+          test -f "$root/LICENSE"
           test -f "$root/dist/index.js"
           test -f "$root/dist/src/provider.js"
           test -f "$root/assets/ui/xiaoai-console.css"
@@ -210,22 +221,54 @@ jobs:
           test -f "$root/assets/fonts/noto-sans-sc/wght.css"
           test -f "$root/scripts/configure-openclaw-install.mjs"
           test -f "$root/scripts/configure-openclaw-uninstall.mjs"
+          test -f "$root/scripts/publish-clawhub-package.mjs"
           test -f "$root/scripts/probe-xiaomi-status.mjs"
-          test ! -e "$root/README.md"
+          test ! -e "$root/openclaw-plugin-xiaoai-cloud/package.json"
           test ! -e "$root/PROJECT_ANALYSIS.md"
           test ! -e "$root/CROSS_CLAW_ADAPTATION_PLAN.md"
+
+          node - "$root" <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+
+          const root = process.argv[2];
+          const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+          const plugin = JSON.parse(fs.readFileSync(path.join(root, "openclaw.plugin.json"), "utf8"));
+
+          if (pkg.name !== "openclaw-plugin-xiaoai-cloud") {
+            throw new Error(`Unexpected package name: ${pkg.name}`);
+          }
+          if (plugin.id !== pkg.name) {
+            throw new Error(`Plugin id ${plugin.id} does not match package name ${pkg.name}`);
+          }
+          const extensions = pkg.openclaw && Array.isArray(pkg.openclaw.extensions)
+            ? pkg.openclaw.extensions
+            : [];
+          if (extensions.length === 0) {
+            throw new Error("Missing package.json openclaw.extensions");
+          }
+          for (const extension of extensions) {
+            if (!fs.existsSync(path.join(root, extension))) {
+              throw new Error(`Missing OpenClaw extension file: ${extension}`);
+            }
+          }
+          if (!pkg.openclaw.compat || !pkg.openclaw.build) {
+            throw new Error("Missing OpenClaw ClawHub compatibility metadata");
+          }
+          NODE
 
       - name: Smoke test extracted Linux helpers
         run: |
           set -eu
 
-          root="$PWD/smoke-test/zip/openclaw-plugin-xiaoai-cloud"
+          root="$PWD/smoke-test/zip"
           sh -n "$root/install.sh"
           sh -n "$root/uninstall.sh"
           sh "$root/install.sh" --help >/dev/null
           sh "$root/uninstall.sh" --help >/dev/null
           node "$root/scripts/configure-openclaw-install.mjs" --help >/dev/null
           node "$root/scripts/configure-openclaw-uninstall.mjs" --help >/dev/null
+          node --check "$root/scripts/publish-clawhub-package.mjs"
           node --check "$root/scripts/probe-xiaomi-status.mjs"
 
           cat > "$PWD/fake-openclaw-old" <<'EOF'
@@ -269,7 +312,7 @@ jobs:
           New-Item -ItemType Directory -Path smoke-test\zip | Out-Null
           Expand-Archive -LiteralPath openclaw-plugin-xiaoai-cloud-bundle.zip -DestinationPath smoke-test\zip -Force
 
-          $root = "smoke-test\zip\openclaw-plugin-xiaoai-cloud"
+          $root = "smoke-test\zip"
           @(
             "$root\install.sh",
             "$root\install.cmd",
@@ -277,7 +320,8 @@ jobs:
             "$root\uninstall.cmd",
             "$root\openclaw.plugin.json",
             "$root\package.json",
-            "$root\package-lock.json",
+            "$root\README.md",
+            "$root\LICENSE",
             "$root\dist\index.js",
             "$root\dist\src\provider.js",
             "$root\assets\ui\xiaoai-console.css",
@@ -287,6 +331,7 @@ jobs:
             "$root\assets\fonts\noto-sans-sc\wght.css",
             "$root\scripts\configure-openclaw-install.mjs",
             "$root\scripts\configure-openclaw-uninstall.mjs",
+            "$root\scripts\publish-clawhub-package.mjs",
             "$root\scripts\probe-xiaomi-status.mjs"
           ) | ForEach-Object {
             if (-not (Test-Path $_)) {
@@ -295,7 +340,7 @@ jobs:
           }
 
           @(
-            "$root\README.md",
+            "$root\openclaw-plugin-xiaoai-cloud\package.json",
             "$root\PROJECT_ANALYSIS.md",
             "$root\CROSS_CLAW_ADAPTATION_PLAN.md"
           ) | ForEach-Object {
@@ -304,11 +349,13 @@ jobs:
             }
           }
 
+          node -e "const fs = require('node:fs'); const path = require('node:path'); const root = process.argv[1]; const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')); const plugin = JSON.parse(fs.readFileSync(path.join(root, 'openclaw.plugin.json'), 'utf8')); if (pkg.name !== 'openclaw-plugin-xiaoai-cloud') throw new Error('Unexpected package name: ' + pkg.name); if (plugin.id !== pkg.name) throw new Error('Plugin id mismatch'); const extensions = pkg.openclaw && Array.isArray(pkg.openclaw.extensions) ? pkg.openclaw.extensions : []; if (extensions.length === 0) throw new Error('Missing openclaw.extensions'); for (const extension of extensions) { if (!fs.existsSync(path.join(root, extension))) throw new Error('Missing OpenClaw extension file: ' + extension); } if (!pkg.openclaw.compat || !pkg.openclaw.build) throw new Error('Missing OpenClaw ClawHub compatibility metadata');" "$root"
+
       - name: Smoke test extracted Windows helpers
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $root = Join-Path $PWD "smoke-test\zip\openclaw-plugin-xiaoai-cloud"
+          $root = Join-Path $PWD "smoke-test\zip"
 
           cmd /d /c "call ""$root\install.cmd"" --help >NUL"
           if ($LASTEXITCODE -ne 0) { throw "install.cmd --help failed with exit code $LASTEXITCODE" }
@@ -321,6 +368,9 @@ jobs:
 
           node "$root\scripts\configure-openclaw-uninstall.mjs" --help | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "configure-openclaw-uninstall.mjs --help failed with exit code $LASTEXITCODE" }
+
+          node --check "$root\scripts\publish-clawhub-package.mjs" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "publish-clawhub-package.mjs --check failed with exit code $LASTEXITCODE" }
 
           $fake = Join-Path $PWD "fake-openclaw-old.cmd"
           $fakeLines = @(

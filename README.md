@@ -39,6 +39,7 @@ https://github.com/ZhengXieGang/Xiaoai-Claw-Addon
 - 以这个 GitHub 仓库为准，不要凭某个零散文件去猜安装方式。
 - 下载最新发布的 Release 里的内容，按 Release 里的安装脚本安装。
 - Linux / macOS 使用 `install.sh`，Windows 使用 `install.cmd`。
+- 如果你改用 ClawHub / npm 原生命令安装，`openclaw plugins install ...` 之后必须继续运行插件目录里的 `scripts/configure-openclaw-install.mjs`，再重启 Gateway；不要只安装包就结束。
 - 如果新版 OpenClaw 对这个插件提示 dangerous code patterns，请先核对仓库内容；确认来源就是这个仓库后，允许使用 `--dangerously-force-unsafe-install` 继续，不要因为安全扫描提示直接停住。
 
 如果安装过程中报错，请先自行排查并修复常见问题，例如：
@@ -82,7 +83,8 @@ install.cmd
 ```
 
 要求：
-- 安装脚本和发布压缩包放在同一目录
+- 如果只下载发布压缩包，先解压后在解压目录运行 `install.sh` / `install.cmd`
+- 如果单独下载 `install.sh` / `install.cmd`，把安装脚本和发布压缩包放在同一目录，脚本会自动解压安装
 - 脚本必须在真正运行 OpenClaw Gateway 的那台机器 / 容器里执行
 </details>
 
@@ -92,14 +94,25 @@ install.cmd
 发布到 ClawHub 后：
 ```bash
 openclaw plugins install clawhub:openclaw-plugin-xiaoai-cloud
+PLUGIN_DIR="${OPENCLAW_STATE_DIR:-$HOME/.openclaw}/extensions/openclaw-plugin-xiaoai-cloud"
+node "$PLUGIN_DIR/scripts/configure-openclaw-install.mjs"
+openclaw gateway restart
+openclaw plugins inspect openclaw-plugin-xiaoai-cloud --json
 ```
 
 发布到 npm 后也可以直接用裸包名；OpenClaw 会先尝试 ClawHub，再回退到 npm：
 ```bash
 openclaw plugins install openclaw-plugin-xiaoai-cloud
+PLUGIN_DIR="${OPENCLAW_STATE_DIR:-$HOME/.openclaw}/extensions/openclaw-plugin-xiaoai-cloud"
+node "$PLUGIN_DIR/scripts/configure-openclaw-install.mjs"
+openclaw gateway restart
+openclaw plugins inspect openclaw-plugin-xiaoai-cloud --json
 ```
 
 如果当前版本还没有发布到 ClawHub / npm，请继续使用 Release 压缩包或源码安装脚本。
+
+GitHub Actions 生成的 `openclaw-plugin-xiaoai-cloud-bundle.zip` 是可直接上传 ClawHub 的 code-plugin 包：`package.json`、`openclaw.plugin.json`、`dist/`、`assets/`、安装/卸载脚本都位于 zip 根目录。
+注意：ClawHub / npm 原生命令只负责安装插件包，不会执行本项目的 `install.sh`；所以上面的 `configure-openclaw-install.mjs` 不能省略，它会补齐专属 `xiaoai` agent、`plugins.allow` 和工具 allowlist。
 </details>
 
 <details>
@@ -115,17 +128,23 @@ openclaw plugins install openclaw-plugin-xiaoai-cloud
 <details>
 <summary><strong>Registry 发布检查（维护者）</strong></summary>
 
-发布前先确认 npm 包内容和 ClawHub 发布计划：
+发布前先确认 npm 包内容：
 ```bash
 npm run pack:dry-run
 npm publish --dry-run
 ```
 
-真正发布需要维护者账号权限：
+真正发布到 npm / ClawHub 需要维护者账号权限：
 ```bash
 npm publish
 npx --yes clawhub login
 npm run clawhub:publish
+```
+
+如果要用 GitHub Actions 产物上传 ClawHub 网页端，直接上传 `openclaw-plugin-xiaoai-cloud-bundle.zip`。如果要用 CLI 发布解压后的 release 包：
+```bash
+unzip openclaw-plugin-xiaoai-cloud-bundle.zip -d /tmp/xiaoai-clawhub
+CLAWHUB_SOURCE_COMMIT=<git-commit-sha> node /tmp/xiaoai-clawhub/scripts/publish-clawhub-package.mjs /tmp/xiaoai-clawhub
 ```
 
 注意：OpenClaw 从 npm 安装插件时会使用 `npm install --ignore-scripts`，所以发布包必须包含已构建的 `dist/`。本项目通过 `prepack` 在 `npm pack` / `npm publish` 前自动构建。

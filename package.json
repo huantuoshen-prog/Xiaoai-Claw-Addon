@@ -35,6 +35,7 @@
     "assets/fonts/noto-sans-sc/LICENSE",
     "scripts/configure-openclaw-install.mjs",
     "scripts/configure-openclaw-uninstall.mjs",
+    "scripts/publish-clawhub-package.mjs",
     "scripts/probe-xiaomi-status.mjs",
     "openclaw.plugin.json",
     "README.md",
@@ -60,7 +61,7 @@
     "build": "tsc",
     "prepack": "npm run build",
     "pack:dry-run": "npm pack --dry-run",
-    "clawhub:publish": "npx --yes clawhub package publish . --family code-plugin --name openclaw-plugin-xiaoai-cloud --display-name \"XiaoAI Cloud Plugin\" --source-repo ZhengXieGang/Xiaoai-Claw-Addon"
+    "clawhub:publish": "node scripts/publish-clawhub-package.mjs ."
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
