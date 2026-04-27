@@ -199,8 +199,9 @@ uninstall.cmd
 4. 写入 `openclawAgent`
 5. 保留当前默认 agent，避免 `xiaoai` 抢占已有渠道入口
 6. 自动推断当前通知渠道与目标（能唯一识别时）
-7. 合并必要工具 allowlist
-8. 检查插件并重启 Gateway
+7. 自动合并并验证 `plugins.allow` / 工具 allowlist
+8. 准备本地和全局 Node 模块搜索路径，避免 helper 脚本因 `NODE_PATH` 缺失找不到运行时依赖
+9. 检查插件、输出排障入口并重启 Gateway
 
 </details>
 
@@ -279,6 +280,17 @@ openclaw logs --limit 260 --plain | tail -n 260
 - `xiaomi-network.log`
 - 控制台 `事件` 页
   注：`conversation` 高频轮询的 `mi_request_start/end` 已做采样，错误仍会完整记录，便于保留音频故障链路
+
+快速收集排障信息：
+
+1. `xiaoai_get_status` 会返回插件状态、登录入口、当前设备、调试日志路径和 OpenClaw 路由
+2. 安装脚本结束时会打印 `plugins inspect`、`openclaw logs`、`xiaomi-network.log` 和 `openclaw.json` 的位置
+3. 报 issue 时优先贴安装/卸载日志尾部、`plugins inspect` 结果、`xiaomi-network.log` 中同一时间段的关键事件
+
+如果你同时运行了其他小爱到 OpenClaw 的桥接方案：
+
+1. 先确认当前语音入口是哪条链路：本插件是“小爱云端 MiNA API -> OpenClaw plugin”，本地桥接通常是“音箱/网关 -> bridge 服务 -> OpenClaw”
+2. 两条链路可以共存，但同一台音箱不要同时接管同一段对话；排障时建议先停掉其中一条链路，避免重复转发和回声抑制误判
 
 如果你遇到“音频没播出来”：
 
