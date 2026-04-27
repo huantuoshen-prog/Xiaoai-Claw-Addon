@@ -350,6 +350,18 @@ function resolveManagedWorkspacePath(stateDir, agentId) {
     return path.join(stateDir, `workspace-${agentId}`);
 }
 
+function normalizeCleanupPath(value) {
+    const normalized = readString(value);
+    return normalized ? path.resolve(expandHome(normalized)) : "";
+}
+
+function collectWorkspaceCleanupPaths(workspacePath, managedWorkspacePath) {
+    return uniqueStrings([
+        normalizeCleanupPath(workspacePath),
+        normalizeCleanupPath(managedWorkspacePath),
+    ]);
+}
+
 function collectContext(config, options, stateDir) {
     const plugins = isRecord(config?.plugins) ? config.plugins : {};
     const entries = isRecord(plugins.entries) ? plugins.entries : {};
@@ -369,8 +381,10 @@ function collectContext(config, options, stateDir) {
     const agentList = Array.isArray(config?.agents?.list) ? config.agents.list : [];
     const agentIndex = findAgentIndex(agentList, agentId);
     const agent = agentIndex >= 0 ? agentList[agentIndex] : undefined;
+    const configuredWorkspacePath = readString(agent?.workspace);
+    const managedWorkspacePath = resolveManagedWorkspacePath(stateDir, agentId);
     const workspacePath =
-        readString(agent?.workspace) || resolveManagedWorkspacePath(stateDir, agentId);
+        configuredWorkspacePath || managedWorkspacePath;
 
     return {
         pluginId: options.pluginId,
@@ -381,8 +395,10 @@ function collectContext(config, options, stateDir) {
         pluginConfig: mergedPluginConfig,
         agentIndex,
         agent,
-        workspacePath: path.resolve(expandHome(workspacePath)),
-        managedWorkspacePath: resolveManagedWorkspacePath(stateDir, agentId),
+        workspacePath: normalizeCleanupPath(workspacePath),
+        workspacePathSource: configuredWorkspacePath ? "agent-config" : "managed-default",
+        managedWorkspacePath,
+        workspaceCleanupPaths: collectWorkspaceCleanupPaths(workspacePath, managedWorkspacePath),
         agentDir: path.join(stateDir, "agents", agentId),
         sessionsDir: path.join(stateDir, "agents", agentId, "sessions"),
         extensionDir: path.join(stateDir, "extensions", options.pluginId),
@@ -561,8 +577,33 @@ function pruneConfig(config, context, retention) {
     };
 }
 
-function isManagedWorkspace(context) {
-    return path.resolve(context.workspacePath) === path.resolve(context.managedWorkspacePath);
+function pathContains(parentPath, childPath) {
+    const parent = path.resolve(parentPath);
+    const child = path.resolve(childPath);
+    return child === parent || child.startsWith(`${parent}${path.sep}`);
+}
+
+function isUnsafeWorkspaceCleanupPath(context, targetPath) {
+    const resolved = normalizeCleanupPath(targetPath);
+    if (!resolved) {
+        return true;
+    }
+    if (resolved === path.parse(resolved).root) {
+        return true;
+    }
+    if (resolved === path.resolve(os.homedir())) {
+        return true;
+    }
+    if (resolved === path.resolve(context.stateDir)) {
+        return true;
+    }
+    if (pathContains(resolved, context.stateDir)) {
+        return true;
+    }
+    if (context.configFile && resolved === path.resolve(context.configFile)) {
+        return true;
+    }
+    return false;
 }
 
 function removePath(targetPath, removedPaths) {
@@ -607,8 +648,10 @@ function cleanupFilesystem(context, retention) {
         if (pathExists(context.agentDir)) {
             preservedPaths.push(context.agentDir);
         }
-        if (pathExists(context.workspacePath)) {
-            preservedPaths.push(context.workspacePath);
+        for (const workspacePath of context.workspaceCleanupPaths) {
+            if (pathExists(workspacePath)) {
+                preservedPaths.push(workspacePath);
+            }
         }
         if (retention.keepHistory) {
             if (pathExists(context.sessionsDir)) {
@@ -630,13 +673,18 @@ function cleanupFilesystem(context, retention) {
         : "";
 
     removePath(context.agentDir, removedPaths);
-    if (isManagedWorkspace(context)) {
-        removePath(context.workspacePath, removedPaths);
-    } else if (pathExists(context.workspacePath)) {
-        preservedPaths.push(context.workspacePath);
-        logWarn(
-            `[uninstall] Preserved custom workspace path because it is not the managed default: ${context.workspacePath}`
-        );
+    for (const workspacePath of context.workspaceCleanupPaths) {
+        if (!pathExists(workspacePath)) {
+            continue;
+        }
+        if (isUnsafeWorkspaceCleanupPath(context, workspacePath)) {
+            preservedPaths.push(workspacePath);
+            logWarn(
+                `[uninstall] Preserved workspace cleanup target because it looks unsafe to remove: ${workspacePath}`
+            );
+            continue;
+        }
+        removePath(workspacePath, removedPaths);
     }
 
     return {
@@ -783,6 +831,9 @@ async function uninstallPlugin(options) {
     logInfo(`[uninstall] Active OpenClaw config file: ${configFile}`);
     logInfo(`[uninstall] Active OpenClaw state dir: ${stateDir}`);
     logInfo(`[uninstall] Resolved dedicated agent: ${context.agentId || "<none>"}`);
+    logInfo(
+        `[uninstall] Resolved dedicated workspace: ${context.workspacePath || "<none>"} (${context.workspacePathSource})`
+    );
 
     const retention = await resolveRetentionChoices(options, context);
     const initialGatewayPid = resolveGatewayRuntimePid(runOpenclaw);
@@ -814,6 +865,8 @@ async function uninstallPlugin(options) {
         configFile,
         stateDir,
         agentId: context.agentId,
+        workspacePath: context.workspacePath,
+        workspacePathSource: context.workspacePathSource,
         keepAgent: retention.keepAgent,
         keepHistory: retention.keepHistory,
         pluginUninstall: uninstallResult,

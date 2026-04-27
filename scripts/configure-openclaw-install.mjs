@@ -1295,6 +1295,9 @@ function configureOpenclaw(options) {
     const verifiedConfig = readJsonFile(configFile);
     const verifiedPlugins = isRecord(verifiedConfig.plugins) ? verifiedConfig.plugins : {};
     const verifiedEntries = isRecord(verifiedPlugins.entries) ? verifiedPlugins.entries : {};
+    const verifiedAllow = Array.isArray(verifiedPlugins.allow)
+        ? verifiedPlugins.allow.filter((item) => typeof item === "string")
+        : [];
     const verifiedAgentList = Array.isArray(verifiedConfig?.agents?.list)
         ? verifiedConfig.agents.list
         : [];
@@ -1318,6 +1321,12 @@ function configureOpenclaw(options) {
         fail(
             `[install] Plugin config verification failed for "${options.pluginId}". ` +
                 `Expected openclawAgent=${desiredAgentId}, got ${verifiedPluginAgent || "<empty>"}.`
+        );
+    }
+    if (!verifiedAllow.includes(options.pluginId)) {
+        fail(
+            `[install] Plugin allowlist verification failed for "${options.pluginId}". ` +
+                `Expected plugins.allow to include ${options.pluginId}.`
         );
     }
     if (desiredModel && verifiedAgent?.model !== desiredModel) {
@@ -1356,6 +1365,18 @@ function configureOpenclaw(options) {
                 },
                 updatedGlobalTools: {
                     alsoAllow,
+                },
+                diagnostics: {
+                    pluginStatus:
+                        `${options.openclawBin} plugins inspect ${options.pluginId} --json`,
+                    gatewayLogs: `${options.openclawBin} logs --limit 260 --plain`,
+                    pluginTrace: path.join(
+                        path.dirname(configFile),
+                        "plugins",
+                        "xiaoai-cloud",
+                        "xiaomi-network.log"
+                    ),
+                    configFile,
                 },
                 hostRuntime,
                 allow,

@@ -172,6 +172,42 @@ require_command() {
   fi
 }
 
+append_node_path_entry() {
+  candidate="$1"
+  if [ -z "$candidate" ] || [ ! -d "$candidate" ]; then
+    return 0
+  fi
+  case ":${NODE_PATH:-}:" in
+    *":$candidate:"*)
+      ;;
+    *)
+      NODE_PATH="${NODE_PATH:+$NODE_PATH:}$candidate"
+      ;;
+  esac
+}
+
+setup_node_path() {
+  append_node_path_entry "$SOURCE_DIR/node_modules"
+
+  if command -v npm >/dev/null 2>&1; then
+    npm_root=$(npm root -g 2>/dev/null || true)
+    append_node_path_entry "$npm_root"
+  fi
+
+  node_global_paths=$(node -p "require('module').globalPaths.join(':')" 2>/dev/null || true)
+  old_ifs=$IFS
+  IFS=:
+  for candidate in $node_global_paths; do
+    append_node_path_entry "$candidate"
+  done
+  IFS=$old_ifs
+
+  export NODE_PATH
+  if [ -n "${NODE_PATH:-}" ]; then
+    info "[node] NODE_PATH prepared for installer helper scripts."
+  fi
+}
+
 find_release_archive() {
   for candidate in \
     "$SCRIPT_DIR"/openclaw-plugin-xiaoai-cloud-bundle.zip \
@@ -741,6 +777,8 @@ else
   info "[2/6] Using prebuilt release bundle, skipping build..."
 fi
 
+setup_node_path
+
 INITIAL_GATEWAY_PID=$(resolve_gateway_runtime_pid || true)
 if [ -n "$INITIAL_GATEWAY_PID" ]; then
   info "[gateway] Detected running gateway pid before install: $INITIAL_GATEWAY_PID"
@@ -791,3 +829,9 @@ echo "Done. Next step:"
 echo "  1. Call xiaoai_console_open"
 echo "  2. Open the console link"
 echo "  3. Log in and choose a XiaoAi speaker"
+echo
+echo "Diagnostics:"
+echo "  Plugin status: $OPENCLAW_BIN plugins inspect openclaw-plugin-xiaoai-cloud --json"
+echo "  Gateway logs:  $OPENCLAW_BIN logs --limit 260 --plain"
+echo "  Plugin trace:  $(resolve_active_state_dir)/plugins/xiaoai-cloud/xiaomi-network.log"
+echo "  Config file:   $(resolve_openclaw_config_file)"

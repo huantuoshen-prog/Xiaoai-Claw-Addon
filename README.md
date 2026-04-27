@@ -39,6 +39,7 @@ https://github.com/ZhengXieGang/Xiaoai-Claw-Addon
 - 以这个 GitHub 仓库为准，不要凭某个零散文件去猜安装方式。
 - 下载最新发布的 Release 里的内容，按 Release 里的安装脚本安装。
 - Linux / macOS 使用 `install.sh`，Windows 使用 `install.cmd`。
+- 如果你改用 ClawHub / npm 原生命令安装，`openclaw plugins install ...` 之后必须继续运行插件目录里的 `scripts/configure-openclaw-install.mjs`，再重启 Gateway；不要只安装包就结束。
 - 如果新版 OpenClaw 对这个插件提示 dangerous code patterns，请先核对仓库内容；确认来源就是这个仓库后，允许使用 `--dangerously-force-unsafe-install` 继续，不要因为安全扫描提示直接停住。
 
 如果安装过程中报错，请先自行排查并修复常见问题，例如：
@@ -82,8 +83,36 @@ install.cmd
 ```
 
 要求：
-- 安装脚本和发布压缩包放在同一目录
+- 如果只下载发布压缩包，先解压后在解压目录运行 `install.sh` / `install.cmd`
+- 如果单独下载 `install.sh` / `install.cmd`，把安装脚本和发布压缩包放在同一目录，脚本会自动解压安装
 - 脚本必须在真正运行 OpenClaw Gateway 的那台机器 / 容器里执行
+</details>
+
+<details>
+<summary><strong>通过 ClawHub / npm 安装（发布到 registry 后）</strong></summary>
+
+发布到 ClawHub 后：
+```bash
+openclaw plugins install clawhub:openclaw-plugin-xiaoai-cloud
+PLUGIN_DIR="${OPENCLAW_STATE_DIR:-$HOME/.openclaw}/extensions/openclaw-plugin-xiaoai-cloud"
+node "$PLUGIN_DIR/scripts/configure-openclaw-install.mjs"
+openclaw gateway restart
+openclaw plugins inspect openclaw-plugin-xiaoai-cloud --json
+```
+
+发布到 npm 后也可以直接用裸包名；OpenClaw 会先尝试 ClawHub，再回退到 npm：
+```bash
+openclaw plugins install openclaw-plugin-xiaoai-cloud
+PLUGIN_DIR="${OPENCLAW_STATE_DIR:-$HOME/.openclaw}/extensions/openclaw-plugin-xiaoai-cloud"
+node "$PLUGIN_DIR/scripts/configure-openclaw-install.mjs"
+openclaw gateway restart
+openclaw plugins inspect openclaw-plugin-xiaoai-cloud --json
+```
+
+如果当前版本还没有发布到 ClawHub / npm，请继续使用 Release 压缩包或源码安装脚本。
+
+GitHub Actions 生成的 `openclaw-plugin-xiaoai-cloud-bundle.zip` 是可直接上传 ClawHub 的 code-plugin 包：`package.json`、`openclaw.plugin.json`、`dist/`、`assets/`、安装/卸载脚本都位于 zip 根目录。
+注意：ClawHub / npm 原生命令只负责安装插件包，不会执行本项目的 `install.sh`；所以上面的 `configure-openclaw-install.mjs` 不能省略，它会补齐专属 `xiaoai` agent、`plugins.allow` 和工具 allowlist。
 </details>
 
 <details>
@@ -95,6 +124,33 @@ install.cmd
 - `--skip-npm-install`：跳过依赖安装
 
 </details>
+
+<details>
+<summary><strong>Registry 发布检查（维护者）</strong></summary>
+
+发布前先确认 npm 包内容：
+```bash
+npm run pack:dry-run
+npm publish --dry-run
+```
+
+真正发布到 npm / ClawHub 需要维护者账号权限：
+```bash
+npm publish
+npx --yes clawhub login
+npm run clawhub:publish
+```
+
+如果要用 GitHub Actions 产物上传 ClawHub 网页端，直接上传 `openclaw-plugin-xiaoai-cloud-bundle.zip`。如果要用 CLI 发布解压后的 release 包：
+```bash
+unzip openclaw-plugin-xiaoai-cloud-bundle.zip -d /tmp/xiaoai-clawhub
+CLAWHUB_SOURCE_COMMIT=<git-commit-sha> node /tmp/xiaoai-clawhub/scripts/publish-clawhub-package.mjs /tmp/xiaoai-clawhub
+```
+
+注意：OpenClaw 从 npm 安装插件时会使用 `npm install --ignore-scripts`，所以发布包必须包含已构建的 `dist/`。本项目通过 `prepack` 在 `npm pack` / `npm publish` 前自动构建。
+当前 npm 上的 ClawHub CLI v0.9.0 还没有 `package publish --dry-run` 选项；ClawHub 上传只能在维护者登录后执行真实发布命令。
+</details>
+
 <details>
 <summary><strong>从源码安装</strong></summary>
 
@@ -199,8 +255,9 @@ uninstall.cmd
 4. 写入 `openclawAgent`
 5. 保留当前默认 agent，避免 `xiaoai` 抢占已有渠道入口
 6. 自动推断当前通知渠道与目标（能唯一识别时）
-7. 合并必要工具 allowlist
-8. 检查插件并重启 Gateway
+7. 自动合并并验证 `plugins.allow` / 工具 allowlist
+8. 准备本地和全局 Node 模块搜索路径，避免 helper 脚本因 `NODE_PATH` 缺失找不到运行时依赖
+9. 检查插件、输出排障入口并重启 Gateway
 
 </details>
 
@@ -348,6 +405,17 @@ openclaw logs --limit 260 --plain | tail -n 260
 - `xiaomi-network.log`
 - 控制台 `事件` 页
   注：`conversation` 高频轮询的 `mi_request_start/end` 已做采样，错误仍会完整记录，便于保留音频故障链路
+
+快速收集排障信息：
+
+1. `xiaoai_get_status` 会返回插件状态、登录入口、当前设备、调试日志路径和 OpenClaw 路由
+2. 安装脚本结束时会打印 `plugins inspect`、`openclaw logs`、`xiaomi-network.log` 和 `openclaw.json` 的位置
+3. 报 issue 时优先贴安装/卸载日志尾部、`plugins inspect` 结果、`xiaomi-network.log` 中同一时间段的关键事件
+
+如果你同时运行了其他小爱到 OpenClaw 的桥接方案：
+
+1. 先确认当前语音入口是哪条链路：本插件是“小爱云端 MiNA API -> OpenClaw plugin”，本地桥接通常是“音箱/网关 -> bridge 服务 -> OpenClaw”
+2. 两条链路可以共存，但同一台音箱不要同时接管同一段对话；排障时建议先停掉其中一条链路，避免重复转发和回声抑制误判
 
 如果你遇到“音频没播出来”：
 
