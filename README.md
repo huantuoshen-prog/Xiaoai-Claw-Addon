@@ -87,6 +87,22 @@ install.cmd
 </details>
 
 <details>
+<summary><strong>通过 ClawHub / npm 安装（发布到 registry 后）</strong></summary>
+
+发布到 ClawHub 后：
+```bash
+openclaw plugins install clawhub:openclaw-plugin-xiaoai-cloud
+```
+
+发布到 npm 后也可以直接用裸包名；OpenClaw 会先尝试 ClawHub，再回退到 npm：
+```bash
+openclaw plugins install openclaw-plugin-xiaoai-cloud
+```
+
+如果当前版本还没有发布到 ClawHub / npm，请继续使用 Release 压缩包或源码安装脚本。
+</details>
+
+<details>
 <summary><strong>安装脚本附加参数</strong></summary>
 
 - `--profile <name>`：指定 OpenClaw profile
@@ -95,6 +111,27 @@ install.cmd
 - `--skip-npm-install`：跳过依赖安装
 
 </details>
+
+<details>
+<summary><strong>Registry 发布检查（维护者）</strong></summary>
+
+发布前先确认 npm 包内容和 ClawHub 发布计划：
+```bash
+npm run pack:dry-run
+npm publish --dry-run
+```
+
+真正发布需要维护者账号权限：
+```bash
+npm publish
+npx --yes clawhub login
+npm run clawhub:publish
+```
+
+注意：OpenClaw 从 npm 安装插件时会使用 `npm install --ignore-scripts`，所以发布包必须包含已构建的 `dist/`。本项目通过 `prepack` 在 `npm pack` / `npm publish` 前自动构建。
+当前 npm 上的 ClawHub CLI v0.9.0 还没有 `package publish --dry-run` 选项；ClawHub 上传只能在维护者登录后执行真实发布命令。
+</details>
+
 <details>
 <summary><strong>从源码安装</strong></summary>
 
